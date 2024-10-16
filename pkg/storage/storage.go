@@ -6,12 +6,12 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-// Хранилище данных.
+// Storage Хранилище данных.
 type Storage struct {
 	db *pgxpool.Pool
 }
 
-// Конструктор, принимает строку подключения к БД.
+// New Конструктор, принимает строку подключения к БД.
 func New(constr string) (*Storage, error) {
 	db, err := pgxpool.Connect(context.Background(), constr)
 	if err != nil {
@@ -23,7 +23,7 @@ func New(constr string) (*Storage, error) {
 	return &s, nil
 }
 
-// Задача.
+// Task Задача.
 type Task struct {
 	ID         int
 	Opened     int64
@@ -93,4 +93,126 @@ func (s *Storage) NewTask(t Task) (int, error) {
 		t.Content,
 	).Scan(&id)
 	return id, err
+}
+
+// FindTasksByAuthor ищет задачи по идентификатору автора
+func (s *Storage) FindTasksByAuthor(authorID int) ([]Task, error) {
+	var tasks []Task
+	query := `
+		SELECT 
+			id,
+			opened,
+			closed,
+			author_id,
+			assigned_id,
+			title,
+			content
+		FROM tasks
+		WHERE
+			$1 = 0 OR author_id = $1
+		ORDER BY id;`
+	rows, err := s.db.Query(context.Background(), query, authorID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var t Task
+		err = rows.Scan(
+			&t.ID,
+			&t.Opened,
+			&t.Closed,
+			&t.AuthorID,
+			&t.AssignedID,
+			&t.Title,
+			&t.Content,
+		)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+
+	}
+	return tasks, rows.Err()
+}
+
+// FindTasksByLabel ищет задачи по идентификатору метки
+func (s *Storage) FindTasksByLabel(labelId int) ([]Task, error) {
+	query := `SELECT 
+					id,
+					opened,
+					closed,
+					author_id,
+					assigned_id,
+					title,
+					content
+              FROM tasks
+              WHERE id in (SELECT task_id FROM tasks_labels WHERE label_id=$1);`
+
+	rows, err := s.db.Query(context.Background(), query, labelId)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var tasks []Task
+
+	for rows.Next() {
+		var t Task
+		err = rows.Scan(
+			&t.ID,
+			&t.Opened,
+			&t.Closed,
+			&t.AuthorID,
+			&t.AssignedID,
+			&t.Title,
+			&t.Content,
+		)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+
+	}
+	return tasks, rows.Err()
+}
+
+func (s *Storage) UpdateTaskTitleByTaskId(id int, title string) error {
+	query := `UPDATE tasks SET title = $2 WHERE id = $1;`
+	_, err := s.db.Exec(context.Background(), query, id, title)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Storage) UpdateTaskContentByTaskId(id int, content string) error {
+	query := `UPDATE tasks SET content = $2 WHERE id = $1;`
+	_, err := s.db.Exec(context.Background(), query, id, content)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Storage) DeleteTaskByTaskId(id int) error {
+	queryDeleteFromTasks := `
+		DELETE FROM tasks_labels WHERE task_id = $1
+		DELETE FROM tasks WHERE id = $1;
+	`
+	_, err := s.db.Exec(context.Background(), queryDeleteFromTasks, id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Storage) CloseTaskByTaskId(id int) error {
+	query := `UPDATE tasks SET closed = extract(epoch from now()) WHERE id = $1;`
+	_, err := s.db.Exec(context.Background(), query, id, close)
+	if err != nil {
+		return err
+	}
+	return nil
 }
